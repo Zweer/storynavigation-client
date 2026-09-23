@@ -1,6 +1,15 @@
+import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { buildImageProxyUrl, buildVideoUrl, decodeMediaUrl } from '../lib/media.js';
+import { ExpiredUrlError } from '../lib/errors.js';
+import {
+  buildImageProxyUrl,
+  buildVideoUrl,
+  decodeMediaUrl,
+  downloadImage,
+  downloadVideo,
+} from '../lib/media.js';
+import { server } from './setup.js';
 
 describe('decodeMediaUrl', () => {
   it('decodes a base64-encoded URL', () => {
@@ -51,5 +60,74 @@ describe('buildVideoUrl', () => {
 
     // Assert
     expect(result).toBe(`https://stories-cdn.fun/${base64Url}`);
+  });
+});
+
+describe('downloadImage', () => {
+  it('fetches bytes through the CDN proxy with the Referer header', async () => {
+    // Arrange
+    const base64Url = 'aHR0cHM6Ly9leGFtcGxl';
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff]); // JPEG magic
+    let referer: string | null = null;
+    server.use(
+      http.get('https://cdn.storynavigation.com/', ({ request }) => {
+        referer = request.headers.get('referer');
+        return HttpResponse.arrayBuffer(bytes.buffer, {
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }),
+    );
+
+    // Act
+    const result = await downloadImage(base64Url);
+
+    // Assert
+    expect(referer).toBe('https://storynavigation.com/');
+    expect([...result]).toEqual([0xff, 0xd8, 0xff]);
+  });
+
+  it('throws ExpiredUrlError on 403', async () => {
+    // Arrange
+    server.use(
+      http.get('https://cdn.storynavigation.com/', () =>
+        HttpResponse.text('URL signature mismatch', { status: 403 }),
+      ),
+    );
+
+    // Act & Assert
+    await expect(downloadImage('YWJj')).rejects.toBeInstanceOf(ExpiredUrlError);
+  });
+});
+
+describe('downloadVideo', () => {
+  it('fetches bytes from the stories-cdn.fun host', async () => {
+    // Arrange
+    const base64Url = 'dmlkZW8';
+    const bytes = new Uint8Array([0x00, 0x00, 0x00, 0x18]); // mp4-ish
+    server.use(
+      http.get(`https://stories-cdn.fun/${base64Url}`, () =>
+        HttpResponse.arrayBuffer(bytes.buffer, {
+          headers: { 'Content-Type': 'video/mp4' },
+        }),
+      ),
+    );
+
+    // Act
+    const result = await downloadVideo(base64Url);
+
+    // Assert
+    expect(result.byteLength).toBe(4);
+  });
+
+  it('throws ExpiredUrlError on 403', async () => {
+    // Arrange
+    server.use(
+      http.get('https://stories-cdn.fun/:b64', () =>
+        HttpResponse.text('Bad URL hash', { status: 403 }),
+      ),
+    );
+
+    // Act & Assert
+    await expect(downloadVideo('YWJj')).rejects.toBeInstanceOf(ExpiredUrlError);
   });
 });

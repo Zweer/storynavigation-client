@@ -56,6 +56,7 @@ export interface PostsStatistics {
   commentsCount: number;
   likesCount: number;
   percentOfFollowersWhoComments: number;
+  percentOfFollowersWhoLikes: number;
 }
 
 /** Full response of `POST /get-user-profile`. */
@@ -66,4 +67,78 @@ export interface Profile {
   accountInfo: AccountInfo;
   posts: Post[];
   postsStatistics: PostsStatistics;
+}
+
+/**
+ * A saved highlight cover as returned by `POST /get-user-highlights`.
+ * Use {@link Highlight.id} as the `highlightId` for `get-highlight-stories`.
+ */
+export interface Highlight {
+  /** Highlight id, e.g. "18195781759377100". */
+  id: string;
+  /** Display title, e.g. "Roman". */
+  title: string;
+  /** Base64-encoded IG cover image URL. */
+  imageThumbnail: string;
+}
+
+/** The media type of a story item. */
+export type StoryType = 'image' | 'video';
+
+/**
+ * A single item inside a highlight, as returned by
+ * `POST /get-highlight-stories`. Leaner than {@link Post}.
+ */
+export interface StoryItem {
+  type: StoryType;
+  /** Space-separated timestamp, e.g. "2026-08-30 11:00:53" (not ISO-T). */
+  createdTime: string;
+  /** Base64-encoded IG image URL (poster / still). */
+  thumbnailUrl: string;
+  /** Base64-encoded IG video URL — only present when `type === 'video'`. */
+  videoUrl?: string;
+}
+
+/**
+ * A currently-active story as returned by `POST /get-user-last-stories`.
+ * Ephemeral (24h) — download immediately (see `media.md`).
+ */
+export interface Story {
+  /** Composite id "mediaId_ownerId", e.g. "3991908919060144294_528817151". */
+  id: string;
+  type: StoryType;
+  /** Base64-encoded IG image URL (poster). */
+  thumbnailUrl: string;
+  /** Base64-encoded IG media URL (image or video). */
+  url: string;
+  /** Time-of-day string, e.g. "15:57:27". */
+  createdTime: string;
+  /** Unix timestamp (seconds) when the story was taken. */
+  taken_at: number;
+  /** Unix timestamp (seconds) when the story expires. */
+  expiring_at: number;
+  /** Numeric IG user id as a string. */
+  owner_id: string;
+}
+
+/** Wrapper object returned by `POST /get-user-last-stories`. */
+export interface LastStoriesResponse {
+  lastStories: Story[];
+}
+
+/**
+ * A comment on a post, as returned by `POST /get-media-comments`.
+ * Field names are snake_case (matching the API); `child_comments` is recursive.
+ */
+export interface Comment {
+  /** Human string, e.g. "21 September 2026 09:48:23" (not ISO). */
+  created_at: string;
+  /** Comment body; may contain @mentions / unicode / emoji. */
+  text: string;
+  /** Commenter's IG handle. */
+  user_name: string;
+  /** Base64-encoded IG avatar URL. */
+  profile_pic_url: string;
+  /** Nested replies; `[]` when there are none. */
+  child_comments: Comment[];
 }

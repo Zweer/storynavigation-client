@@ -33,13 +33,40 @@ export class ServerError extends StoryNavigationError {
 }
 
 /**
- * Thrown when the CDN proxy returns `403 Bad URL hash`, meaning the
- * signed Instagram URL has expired. Media URLs must be downloaded
- * immediately after they are received (fetch-then-download-now).
+ * Thrown when the requested account does not exist or is not resolvable
+ * (`get-user-profile` returns `{ found: false }`).
+ */
+export class NotFoundError extends StoryNavigationError {
+  constructor(public readonly userName: string) {
+    super(`Account not found: ${userName}`);
+    this.name = 'NotFoundError';
+  }
+}
+
+/**
+ * Thrown when the CDN proxy refuses a media URL with `403`, meaning the
+ * signed Instagram URL has expired or its signature no longer matches
+ * (`URL signature mismatch` / `Bad URL hash`). Media URLs must be
+ * downloaded immediately after they are received (fetch-then-download-now).
  */
 export class ExpiredUrlError extends StoryNavigationError {
-  constructor(message = 'Bad URL hash — the media URL has expired') {
+  constructor(message = 'URL signature mismatch — the media URL has expired') {
     super(message);
     this.name = 'ExpiredUrlError';
+  }
+}
+
+/**
+ * Thrown for unexpected, non-mapped HTTP failures (any status that is not
+ * specifically handled as {@link CsrfError} / {@link ServerError}).
+ */
+export class HttpError extends StoryNavigationError {
+  constructor(
+    public readonly status: number,
+    public readonly endpoint: string,
+    message?: string,
+  ) {
+    super(message ?? `Unexpected HTTP ${status} (${endpoint})`);
+    this.name = 'HttpError';
   }
 }
