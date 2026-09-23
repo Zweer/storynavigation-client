@@ -1,6 +1,6 @@
 {
   "name": "@zweer/storynavigation-client",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A TypeScript client for StoryNavigation's internal API. Fetch Instagram profiles, recent posts, and download media.",
   "keywords": [
     "storynavigation",
