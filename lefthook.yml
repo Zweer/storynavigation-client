@@ -1,0 +1,43 @@
+pre-commit:
+  piped: true
+  commands:
+    format:
+      glob: "*.{ts,json,yaml,md,css}"
+      run: npm run lint:format
+      stage_fixed: true
+      priority: 1
+    lockfile:
+      glob: "package-lock.json"
+      run: npm run lint:lockfile
+      priority: 1
+    package-lint:
+      glob: "package.json"
+      run: npm run lint:package
+      priority: 1
+    package-sort:
+      glob: "package.json"
+      run: npm run lint:sort_package
+      stage_fixed: true
+      priority: 1
+    build:
+      glob: "*.ts"
+      run: npm run build
+      priority: 2
+    typecheck:
+      glob: "*.ts"
+      run: npm run lint:typecheck
+      priority: 3
+    test:
+      glob: "*.ts"
+      run: npm test
+      priority: 3
+
+commit-msg:
+  piped: true
+  commands:
+    sanitize:
+      run: sed -i 's/[[:space:]]*$//' {1} && sed -i 's/^ \{1,2\}//' {1} && sed -i '/^$/N;/^\n$/d' {1}
+      priority: 1
+    commitlint:
+      run: npx --no -- commitlint --edit {1}
+      priority: 2

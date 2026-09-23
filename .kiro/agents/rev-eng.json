@@ -1,0 +1,32 @@
+{
+  "name": "rev-eng",
+  "description": "Reverse engineering agent — discovers StoryNavigation's internal API via plain HTTP (curl), no browser needed",
+  "prompt": "file://../prompts/rev-eng.md",
+  "resources": [
+    "file://docs/**/*.md",
+    "file://AGENTS.md",
+    "file://README.md",
+    "file://.env.example"
+  ],
+  "tools": [
+    "read",
+    "write",
+    "shell",
+    "grep",
+    "glob",
+    "web_search",
+    "web_fetch",
+    "introspect",
+    "thinking"
+  ],
+  "allowedTools": ["read", "grep", "glob", "web_fetch"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["docs/**"]
+    },
+    "shell": {
+      "autoAllowReadonly": true,
+      "deniedCommands": [".*git commit.*", ".*git push.*", ".*git tag .*", ".*npm publish.*"]
+    }
+  }
+}
