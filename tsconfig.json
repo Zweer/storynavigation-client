@@ -6,6 +6,6 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["lib/**/*.ts"],
+  "include": ["lib/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -51,7 +51,7 @@
     "prepare": "test -n \"$CI\" || lefthook install",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "npx tsx scripts/e2e.ts",
+    "test:e2e": "tsx --env-file-if-exists=.env scripts/e2e.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -70,6 +70,7 @@
     "rimraf": "^6.1.3",
     "sort-package-json": "^4.0.0",
     "tsdown": "^0.22.14",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
