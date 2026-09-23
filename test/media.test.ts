@@ -1,7 +1,7 @@
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { ExpiredUrlError } from '../lib/errors.js';
+import { ExpiredUrlError, MediaTooLargeError } from '../lib/errors.js';
 import {
   buildImageProxyUrl,
   buildVideoUrl,
@@ -129,5 +129,54 @@ describe('downloadVideo', () => {
 
     // Act & Assert
     await expect(downloadVideo('YWJj')).rejects.toBeInstanceOf(ExpiredUrlError);
+  });
+});
+
+describe('download size cap', () => {
+  it('rejects when the declared Content-Length exceeds maxBytes', async () => {
+    // Arrange
+    server.use(
+      http.get('https://cdn.storynavigation.com/', () =>
+        HttpResponse.arrayBuffer(new Uint8Array(10).buffer, {
+          headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '999999' },
+        }),
+      ),
+    );
+
+    // Act & Assert
+    await expect(downloadImage('YWJj', { maxBytes: 1024 })).rejects.toBeInstanceOf(
+      MediaTooLargeError,
+    );
+  });
+
+  it('aborts a stream that grows past maxBytes even without Content-Length', async () => {
+    // Arrange — a body larger than the cap, no Content-Length header
+    const big = new Uint8Array(5000);
+    server.use(
+      http.get('https://cdn.storynavigation.com/', () =>
+        HttpResponse.arrayBuffer(big.buffer, { headers: { 'Content-Type': 'image/jpeg' } }),
+      ),
+    );
+
+    // Act & Assert
+    await expect(downloadImage('YWJj', { maxBytes: 1024 })).rejects.toBeInstanceOf(
+      MediaTooLargeError,
+    );
+  });
+
+  it('accepts a body within maxBytes', async () => {
+    // Arrange
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    server.use(
+      http.get('https://cdn.storynavigation.com/', () =>
+        HttpResponse.arrayBuffer(bytes.buffer, { headers: { 'Content-Type': 'image/jpeg' } }),
+      ),
+    );
+
+    // Act
+    const result = await downloadImage('YWJj', { maxBytes: 1024 });
+
+    // Assert
+    expect(result.byteLength).toBe(4);
   });
 });

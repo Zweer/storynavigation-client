@@ -8,7 +8,9 @@ export {
   CsrfError,
   ExpiredUrlError,
   HttpError,
+  MediaTooLargeError,
   NotFoundError,
+  ParseError,
   ServerError,
   StoryNavigationError,
 } from './errors.js';

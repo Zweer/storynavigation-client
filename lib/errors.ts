@@ -70,3 +70,33 @@ export class HttpError extends StoryNavigationError {
     this.name = 'HttpError';
   }
 }
+
+/**
+ * Thrown when a `200` response body is not valid JSON — typically an anti-bot
+ * challenge or maintenance page served as HTML. Non-retryable: retrying would
+ * just re-fetch the same non-JSON body.
+ */
+export class ParseError extends StoryNavigationError {
+  constructor(
+    public readonly endpoint: string,
+    public readonly bodySnippet: string,
+  ) {
+    super(`Response was not valid JSON (${endpoint}): ${bodySnippet}`);
+    this.name = 'ParseError';
+  }
+}
+
+/**
+ * Thrown when a media download exceeds the configured `maxBytes` cap, either
+ * from the declared `Content-Length` or the actual streamed size.
+ */
+export class MediaTooLargeError extends StoryNavigationError {
+  constructor(
+    public readonly url: string,
+    public readonly maxBytes: number,
+    public readonly actualBytes: number,
+  ) {
+    super(`Media exceeds the ${maxBytes}-byte limit (got ${actualBytes}): ${url}`);
+    this.name = 'MediaTooLargeError';
+  }
+}

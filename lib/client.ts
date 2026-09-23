@@ -20,6 +20,11 @@ export interface StoryNavigationClientOptions {
   maxRetries?: number;
   /** Injectable fetch, mainly for testing. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
+  /**
+   * Maximum bytes for a single media download before it is aborted with a
+   * `MediaTooLargeError`. Defaults to 100 MiB.
+   */
+  maxDownloadBytes?: number;
 }
 
 /**
@@ -40,10 +45,12 @@ export class StoryNavigationClient {
   readonly baseUrl: string;
   private readonly http: HttpClient;
   private readonly fetchImpl?: typeof fetch;
+  private readonly maxDownloadBytes?: number;
 
   constructor(options: StoryNavigationClientOptions = {}) {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetch;
+    this.maxDownloadBytes = options.maxDownloadBytes;
     this.http = new HttpClient({
       baseUrl: this.baseUrl,
       maxRetries: options.maxRetries,
@@ -143,6 +150,13 @@ export class StoryNavigationClient {
   }
 
   private downloadOptions(): DownloadOptions {
-    return this.fetchImpl ? { fetch: this.fetchImpl } : {};
+    const options: DownloadOptions = {};
+    if (this.fetchImpl) {
+      options.fetch = this.fetchImpl;
+    }
+    if (this.maxDownloadBytes !== undefined) {
+      options.maxBytes = this.maxDownloadBytes;
+    }
+    return options;
   }
 }
