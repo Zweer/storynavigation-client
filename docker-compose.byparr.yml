@@ -1,0 +1,37 @@
+# Byparr — self-hosted anti-bot (Cloudflare) solver, FlareSolverr-compatible API.
+#
+# This is an EXPERIMENT to check whether StoryNavigation's new Cloudflare
+# "managed challenge" can be cleared at all. Byparr runs a real (Camoufox /
+# Firefox-based) stealth browser, solves the JS challenge, and returns the
+# resolved HTML plus the session cookies (incl. `cf_clearance`).
+#
+# Image:  ghcr.io/thephaseless/byparr:latest
+# API:    FlareSolverr-compatible, POST http://localhost:8191/v1
+# Docs:   http://localhost:8191/docs
+#
+# ⚠️ Byparr does NOT guarantee a bypass. Cloudflare often also wants traffic
+#    from a "legitimate"-looking residential/public IP, so a datacenter or VPN
+#    egress may still fail even when the browser check passes.
+#
+# Usage:
+#   docker compose -f docker-compose.byparr.yml up -d
+#   ./scripts/byparr-probe.sh heyjoanar
+#   docker compose -f docker-compose.byparr.yml down
+
+services:
+  byparr:
+    image: ghcr.io/thephaseless/byparr:latest
+    container_name: byparr
+    restart: unless-stopped
+    ports:
+      - '8191:8191'
+    environment:
+      # Pin locale/timezone so the container skips the egress-IP GeoIP lookup.
+      BROWSER_LOCALE: en-US
+      BROWSER_TIMEZONE: Europe/Rome
+      # LOG_LEVEL: debug
+    # Byparr does a lot of disk I/O; offload /tmp and /cache to RAM.
+    shm_size: '1gb'
+    tmpfs:
+      - /tmp:exec,mode=1777,size=2G
+      - /cache:exec,mode=1777,size=2G

@@ -1,8 +1,10 @@
+import { ByparrSolver } from './byparr.js';
 import { getMediaComments } from './comments.js';
 import { HttpClient } from './http.js';
 import { type DownloadOptions, downloadImage, downloadVideo } from './media.js';
 import { getUserMedias } from './medias.js';
 import { getProfile } from './profile.js';
+import type { ChallengeSolver } from './solver.js';
 import { getHighlightStories, getUserHighlights, getUserLastStories } from './stories.js';
 import type { Comment, Highlight, Post, Profile, Story, StoryItem } from './types.js';
 
@@ -25,6 +27,16 @@ export interface StoryNavigationClientOptions {
    * `MediaTooLargeError`. Defaults to 100 MiB.
    */
   maxDownloadBytes?: number;
+  /**
+   * Cloudflare challenge solver. When set, the client bootstraps its session
+   * through the solver. Takes precedence over {@link byparrUrl}.
+   */
+  solver?: ChallengeSolver;
+  /**
+   * Convenience for constructing a `ByparrSolver` pointed at the given Byparr
+   * URL. Used only when {@link solver} is not provided.
+   */
+  byparrUrl?: string;
 }
 
 /**
@@ -51,10 +63,16 @@ export class StoryNavigationClient {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetch;
     this.maxDownloadBytes = options.maxDownloadBytes;
+    const solver =
+      options.solver ??
+      (options.byparrUrl
+        ? new ByparrSolver({ baseUrl: options.byparrUrl, fetch: options.fetch })
+        : undefined);
     this.http = new HttpClient({
       baseUrl: this.baseUrl,
       maxRetries: options.maxRetries,
       fetch: options.fetch,
+      solver,
     });
   }
 

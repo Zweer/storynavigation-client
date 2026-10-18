@@ -1,9 +1,18 @@
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CsrfError, HttpError, ParseError, ServerError } from '../lib/errors.js';
+import { ChallengeError, CsrfError, HttpError, ParseError, ServerError } from '../lib/errors.js';
 import { HttpClient } from '../lib/http.js';
+import type { ChallengeSolver, SolvedSession } from '../lib/solver.js';
 import { BASE_URL, mockSession, SESSION_SET_COOKIES, server } from './setup.js';
+
+/** A CF-challenge 403 response: `cf-mitigated` header + "Just a moment" body. */
+function challengeResponse(): HttpResponse {
+  return new HttpResponse('<html><title>Just a moment...</title></html>', {
+    status: 403,
+    headers: { 'cf-mitigated': 'challenge', server: 'cloudflare' },
+  });
+}
 
 describe('HttpClient session + CSRF', () => {
   it('bootstraps the session and sends decoded CSRF token + cookies on POST', async () => {
@@ -145,6 +154,92 @@ describe('HttpClient CSRF re-bootstrap (session expiry recovery)', () => {
     // Act & Assert — one initial attempt + one after re-bootstrap, then give up
     await expect(client.post('get-user-profile', {}, 'nasa')).rejects.toBeInstanceOf(CsrfError);
     expect(handler).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('HttpClient challenge solver', () => {
+  function fakeSolver(): ChallengeSolver & { solve: ReturnType<typeof vi.fn> } {
+    const solved: SolvedSession = {
+      cookies: {
+        cf_clearance: 'cf',
+        laravel_session: 'session-abc',
+        'XSRF-TOKEN': 'token-xyz%3D%3D',
+      },
+      userAgent: 'UA/1.0',
+    };
+    const solve = vi.fn(async (): Promise<SolvedSession> => solved);
+    return { solve };
+  }
+
+  it('bootstraps via the solver and injects cookies + User-Agent on POST', async () => {
+    // Arrange — no bootstrap GET handler: the solver path must bypass it.
+    const solver = fakeSolver();
+    let captured: Request | undefined;
+    server.use(
+      http.post(`${BASE_URL}/get-user-profile`, ({ request }) => {
+        captured = request;
+        return HttpResponse.json({ found: true });
+      }),
+    );
+    const client = new HttpClient({ baseUrl: BASE_URL, solver });
+
+    // Act
+    await client.post('get-user-profile', { userName: 'nasa' }, 'nasa');
+
+    // Assert
+    expect(solver.solve).toHaveBeenCalledTimes(1);
+    expect(captured?.headers.get('user-agent')).toBe('UA/1.0');
+    expect(captured?.headers.get('x-xsrf-token')).toBe('token-xyz==');
+    expect(captured?.headers.get('cookie')).toContain('laravel_session=session-abc');
+    expect(captured?.headers.get('cookie')).toContain('cf_clearance=cf');
+  });
+
+  it('re-solves once on a CF 403 challenge then succeeds', async () => {
+    // Arrange
+    const solver = fakeSolver();
+    let postCalls = 0;
+    server.use(
+      http.post(`${BASE_URL}/get-user-profile`, () => {
+        postCalls += 1;
+        return postCalls === 1 ? challengeResponse() : HttpResponse.json({ found: true });
+      }),
+    );
+    const client = new HttpClient({ baseUrl: BASE_URL, solver });
+
+    // Act
+    const result = await client.post<{ found: boolean }>('get-user-profile', {}, 'nasa');
+
+    // Assert — initial solve + one re-solve; POST retried once.
+    expect(result.found).toBe(true);
+    expect(solver.solve).toHaveBeenCalledTimes(2);
+    expect(postCalls).toBe(2);
+  });
+
+  it('throws ChallengeError on a second consecutive CF 403 challenge', async () => {
+    // Arrange
+    const solver = fakeSolver();
+    const handler = vi.fn(() => challengeResponse());
+    server.use(http.post(`${BASE_URL}/get-user-profile`, handler));
+    const client = new HttpClient({ baseUrl: BASE_URL, solver, maxRetries: 2 });
+
+    // Act & Assert — initial solve + one re-solve, POST hit twice, then throw.
+    await expect(client.post('get-user-profile', {}, 'nasa')).rejects.toBeInstanceOf(
+      ChallengeError,
+    );
+    expect(solver.solve).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws ChallengeError on a CF 403 bootstrap when no solver is configured', async () => {
+    // Arrange
+    server.use(http.get(`${BASE_URL}/user/:username`, () => challengeResponse()));
+    const client = new HttpClient({ baseUrl: BASE_URL });
+
+    // Act & Assert
+    await expect(client.post('get-user-profile', {}, 'nasa')).rejects.toThrow(/configure/i);
+    await expect(client.post('get-user-profile', {}, 'nasa')).rejects.toBeInstanceOf(
+      ChallengeError,
+    );
   });
 });
 

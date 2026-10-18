@@ -100,3 +100,19 @@ export class MediaTooLargeError extends StoryNavigationError {
     this.name = 'MediaTooLargeError';
   }
 }
+
+/**
+ * Thrown when the main host serves a Cloudflare anti-bot challenge, or when a
+ * configured {@link ChallengeSolver} (e.g. `ByparrSolver`) fails to resolve it.
+ * When no solver is configured, configure one (such as a `ByparrSolver`) to let
+ * the client pass the challenge and bootstrap its session.
+ */
+export class ChallengeError extends StoryNavigationError {
+  constructor(
+    message = 'Cloudflare challenge encountered — a ChallengeSolver (e.g. ByparrSolver) is required or failed',
+    public readonly url?: string,
+  ) {
+    super(url ? `${message} (${url})` : message);
+    this.name = 'ChallengeError';
+  }
+}

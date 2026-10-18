@@ -1,4 +1,5 @@
-import { CsrfError, HttpError, ParseError, ServerError } from './errors.js';
+import { ChallengeError, CsrfError, HttpError, ParseError, ServerError } from './errors.js';
+import type { ChallengeSolver } from './solver.js';
 
 /** Options for the low-level {@link HttpClient}. */
 export interface HttpClientOptions {
@@ -12,6 +13,17 @@ export interface HttpClientOptions {
   timeoutMs?: number;
   /** Injectable fetch, mainly for testing. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
+  /**
+   * Optional Cloudflare challenge solver. When set, the session is bootstrapped
+   * through the solver instead of a raw GET, and a challenge on a POST triggers
+   * a single re-solve.
+   */
+  solver?: ChallengeSolver;
+  /**
+   * Initial User-Agent to send. The solver's returned User-Agent takes
+   * precedence and overwrites this after a successful solve.
+   */
+  userAgent?: string;
 }
 
 const DEFAULT_MAX_RETRIES = 2;
@@ -46,6 +58,10 @@ export class HttpClient {
   private readonly cookies = new Map<string, string>();
   /** The username whose page was used to bootstrap the session. */
   private bootstrappedFor: string | null = null;
+  /** Optional Cloudflare challenge solver. */
+  private readonly solver?: ChallengeSolver;
+  /** Current User-Agent, seeded from options and overwritten by the solver. */
+  private userAgent: string | undefined;
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
@@ -53,6 +69,8 @@ export class HttpClient {
     this.retryBackoffMs = options.retryBackoffMs ?? DEFAULT_BACKOFF_MS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.solver = options.solver;
+    this.userAgent = options.userAgent;
   }
 
   /**
@@ -69,11 +87,33 @@ export class HttpClient {
 
     const encoded = encodeURIComponent(userName);
     const url = `${this.baseUrl}/user/${encoded}`;
+
+    // With a solver configured, delegate the session bootstrap entirely: it
+    // passes any Cloudflare challenge and returns the replayable cookies + UA.
+    if (this.solver) {
+      const solved = await this.solver.solve(url);
+      for (const [name, value] of Object.entries(solved.cookies)) {
+        this.cookies.set(name, value);
+      }
+      this.userAgent = solved.userAgent;
+      this.bootstrappedFor = userName;
+      return;
+    }
+
     const response = await this.withTimeout((signal) =>
       this.fetchImpl(url, { method: 'GET', signal }),
     );
 
     if (!response.ok) {
+      if (response.status === 403) {
+        const bodyText = await response.text();
+        if (this.isChallengeResponse(response, bodyText)) {
+          throw new ChallengeError(
+            'Cloudflare challenge on session bootstrap — configure a ChallengeSolver (e.g. ByparrSolver)',
+            `/user/${encoded}`,
+          );
+        }
+      }
       throw new HttpError(response.status, `/user/${encoded}`, 'Failed to bootstrap session');
     }
 
@@ -85,6 +125,26 @@ export class HttpClient {
   private invalidateSession(): void {
     this.cookies.clear();
     this.bootstrappedFor = null;
+    this.userAgent = undefined;
+  }
+
+  /**
+   * Detect a Cloudflare anti-bot challenge. A `403` is a challenge when the
+   * `cf-mitigated` header is present, or when the `server` is Cloudflare and
+   * the (HTML/non-JSON) body contains a "Just a moment" interstitial.
+   */
+  private isChallengeResponse(response: Response, bodyText?: string): boolean {
+    if (response.status !== 403) {
+      return false;
+    }
+    if (response.headers.has('cf-mitigated')) {
+      return true;
+    }
+    const server = response.headers.get('server') ?? '';
+    if (server.toLowerCase().includes('cloudflare') && bodyText?.includes('Just a moment')) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -102,6 +162,7 @@ export class HttpClient {
     await this.ensureSession(userName);
 
     let csrfReboots = 0;
+    let challengeResolves = 0;
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {
@@ -113,6 +174,17 @@ export class HttpClient {
         // retry the same attempt slot (does not consume a transient retry).
         if (error instanceof CsrfError && csrfReboots === 0) {
           csrfReboots += 1;
+          this.invalidateSession();
+          await this.ensureSession(userName);
+          attempt -= 1;
+          continue;
+        }
+
+        // A Cloudflare challenge on a POST means the clearance expired. With a
+        // solver configured, re-solve once and retry; a second consecutive
+        // challenge falls through to the throw.
+        if (error instanceof ChallengeError && this.solver && challengeResolves === 0) {
+          challengeResolves += 1;
           this.invalidateSession();
           await this.ensureSession(userName);
           attempt -= 1;
@@ -144,6 +216,13 @@ export class HttpClient {
 
       this.captureCookies(response);
 
+      if (response.status === 403) {
+        const bodyText = await response.text();
+        if (this.isChallengeResponse(response, bodyText)) {
+          throw new ChallengeError(undefined, `/${endpoint}`);
+        }
+        throw new HttpError(response.status, `/${endpoint}`);
+      }
       if (response.status === 419) {
         throw new CsrfError();
       }
@@ -184,6 +263,9 @@ export class HttpClient {
     };
     if (token) {
       headers['X-XSRF-TOKEN'] = token;
+    }
+    if (this.userAgent) {
+      headers['User-Agent'] = this.userAgent;
     }
     const cookieHeader = this.serializeCookies();
     if (cookieHeader) {
@@ -240,7 +322,12 @@ export class HttpClient {
   private isRetryable(error: unknown): boolean {
     // Deterministic errors are never retried: 500 (broken endpoints), 419
     // (CSRF — handled separately by the re-bootstrap path), and non-JSON bodies.
-    if (error instanceof ServerError || error instanceof CsrfError || error instanceof ParseError) {
+    if (
+      error instanceof ServerError ||
+      error instanceof CsrfError ||
+      error instanceof ParseError ||
+      error instanceof ChallengeError
+    ) {
       return false;
     }
     // Timeouts, network errors, and unexpected HTTP statuses are transient.

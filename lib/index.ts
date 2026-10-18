@@ -1,3 +1,4 @@
+export { ByparrSolver, type ByparrSolverOptions } from './byparr.js';
 export {
   DEFAULT_BASE_URL,
   StoryNavigationClient,
@@ -5,6 +6,7 @@ export {
 } from './client.js';
 export { getMediaComments } from './comments.js';
 export {
+  ChallengeError,
   CsrfError,
   ExpiredUrlError,
   HttpError,
@@ -32,6 +34,7 @@ export {
   paginateMedias,
 } from './medias.js';
 export { getProfile } from './profile.js';
+export type { ChallengeSolver, SolvedSession } from './solver.js';
 export {
   getHighlightStories,
   getUserHighlights,

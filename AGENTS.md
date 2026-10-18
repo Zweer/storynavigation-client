@@ -20,6 +20,7 @@ The library covers: profile + statistics, the latest ~12 posts per profile, base
 - **Lint/Format:** Biome
 - **Package:** `@zweer/storynavigation-client` (npm)
 - **Auth:** none — the client bootstraps its own Laravel session + CSRF token
+- **Anti-bot:** the site is behind a Cloudflare managed challenge (since 2026-10). An optional, injectable `ChallengeSolver` (with a bundled `ByparrSolver`) clears it; see `README.md` → "Bypassing Cloudflare".
 
 ## Agent Architecture
 
@@ -27,10 +28,12 @@ This project uses two specialized Kiro agents:
 
 ### `rev-eng` — Reverse Engineering Agent
 - **Purpose:** Discover StoryNavigation's internal API over plain HTTP
-- **Method:** `curl` (session bootstrap + Laravel CSRF) — **no browser, no Playwright** (the site is fully scriptable without one; that's why it was chosen over 8 Cloudflare-gated alternatives)
+- **Method:** `curl` (session bootstrap + Laravel CSRF)
 - **Input:** an optional public username in `.env` (no secrets)
 - **Output:** API documentation in `docs/*.md`
 - **Tools:** `shell` (curl), `web_fetch`, `web_search`
+
+> ⚠️ **"No browser" premise no longer holds (2026-10).** `rev-eng` was originally curl-only because the site was fully scriptable without a browser — the reason it was chosen over 8 Cloudflare-gated alternatives. StoryNavigation has since **also moved behind a Cloudflare managed challenge**, so raw curl now gets `403 cf-mitigated: challenge`. To reach the live site, run the Byparr solver (`docker compose -f docker-compose.byparr.yml up -d`) and replay its cookies + User-Agent (see `scripts/byparr-probe.sh` and `README.md`). The API shapes behind the challenge are unchanged.
 
 ### `dev` — Development Agent
 - **Purpose:** Implement the TypeScript library from the API docs
@@ -64,14 +67,18 @@ docs/                  # Reverse-engineered API reference (rev-eng output)
 lib/
 ├── index.ts      # Public barrel (re-exports)
 ├── client.ts     # StoryNavigationClient facade
-├── http.ts       # Session bootstrap + CSRF + retry + error mapping
+├── http.ts       # Session bootstrap + CSRF + solver wiring + retry + error mapping
+├── solver.ts     # ChallengeSolver / SolvedSession abstraction (Cloudflare bypass)
+├── byparr.ts     # ByparrSolver — ChallengeSolver backed by a local Byparr instance
 ├── profile.ts    # get-user-profile
 ├── medias.ts     # get-user-medias
 ├── media.ts      # base64 decode + CDN proxy download (image/video)
 ├── stories.ts    # highlights + last stories
-├── errors.ts     # typed error classes
+├── errors.ts     # typed error classes (incl. ChallengeError)
 └── types.ts      # Post, SidecarItem, Profile, AccountInfo, PostsStatistics
 ```
+
+Solver tooling (repo root): `docker-compose.byparr.yml` (Byparr on `:8191`) + `scripts/byparr-probe.sh` (fire-test).
 
 ## Kiro Configuration
 
@@ -98,7 +105,8 @@ lib/
 
 Full details in `README.md`. The fragile parts the client owns:
 
-- **Session + CSRF:** GET `/user/<username>` sets `laravel_session` + `XSRF-TOKEN`; URL-decode the token into the `X-XSRF-TOKEN` header. Cold calls return `419 CSRF token mismatch`
+- **Cloudflare challenge (2026-10):** the whole site is behind a managed challenge — every request returns `403 cf-mitigated: challenge` with no cookies set. A `ChallengeSolver` (bundled `ByparrSolver`) is required to clear it; the client then replays the returned cookies. The `cf_clearance` cookie is **bound to the solver's User-Agent** — the same UA must be sent on every request or the clearance is invalidated. Without a solver the client throws a typed `ChallengeError`
+- **Session + CSRF:** GET `/user/<username>` sets `laravel_session` + `XSRF-TOKEN`; URL-decode the token into the `X-XSRF-TOKEN` header. Cold calls return `419 CSRF token mismatch`. (With the challenge in place, these cookies now arrive via the solver, not a raw GET)
 - **Mixed casing (by design):** `/get-user-medias` uses `user_name`; `/get-user-profile` + `/paginate-medias` use `userName`. Don't "fix" it
 - **Base64 media URLs:** `thumbnailUrl` / `videoUrl` / `display_url` are base64-encoded Instagram CDN URLs (pad to a multiple of 4)
 - **Two CDN hosts:** images → `cdn.storynavigation.com/?<base64>`; videos → `stories-cdn.fun/<raw base64>`; both need `Referer: https://storynavigation.com/`
