@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/Zweer/storynavigation-client/compare/v1.0.0...v1.1.0) (2026-10-18)
+
+
+### Features
+
+* **http:** :sparkles: add optional Byparr Cloudflare challenge solver ([737cdbe](https://github.com/Zweer/storynavigation-client/commit/737cdbec7321e92aead4c6ccddaa9f1b19853f6b))
+
 ## 1.0.0 (2026-09-23)
 
 
