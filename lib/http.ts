@@ -1,3 +1,4 @@
+import { isCloudflareChallenge } from './challenge.js';
 import { ChallengeError, CsrfError, HttpError, ParseError, ServerError } from './errors.js';
 import type { ChallengeSolver } from './solver.js';
 
@@ -129,22 +130,47 @@ export class HttpClient {
   }
 
   /**
-   * Detect a Cloudflare anti-bot challenge. A `403` is a challenge when the
-   * `cf-mitigated` header is present, or when the `server` is Cloudflare and
-   * the (HTML/non-JSON) body contains a "Just a moment" interstitial.
+   * Detect a Cloudflare anti-bot challenge. Delegates to the shared
+   * {@link isCloudflareChallenge} predicate so the main host and the media CDN
+   * share one definition.
    */
   private isChallengeResponse(response: Response, bodyText?: string): boolean {
-    if (response.status !== 403) {
+    return isCloudflareChallenge(response, bodyText);
+  }
+
+  /**
+   * The serialized cookie header (`name=value; …`) for the current session,
+   * including `cf_clearance`. Intended for replaying the same session on the
+   * media CDN, which is now also behind Cloudflare.
+   */
+  getCookieHeader(): string {
+    return this.serializeCookies();
+  }
+
+  /**
+   * The current User-Agent (the solver's UA after a successful solve). The
+   * media CDN binds `cf_clearance` to this UA, so it must be replayed verbatim.
+   */
+  getUserAgent(): string | undefined {
+    return this.userAgent;
+  }
+
+  /**
+   * Re-solve the Cloudflare challenge for the already-bootstrapped username,
+   * refreshing the session cookies + User-Agent. Used to recover a stale
+   * `cf_clearance` when a media download hits a challenge.
+   *
+   * @returns `true` when the session was re-solved; `false` when it cannot be
+   *   (no solver configured, or no session was ever bootstrapped).
+   */
+  async resolveChallenge(): Promise<boolean> {
+    if (!this.solver || this.bootstrappedFor === null) {
       return false;
     }
-    if (response.headers.has('cf-mitigated')) {
-      return true;
-    }
-    const server = response.headers.get('server') ?? '';
-    if (server.toLowerCase().includes('cloudflare') && bodyText?.includes('Just a moment')) {
-      return true;
-    }
-    return false;
+    const userName = this.bootstrappedFor;
+    this.invalidateSession();
+    await this.ensureSession(userName);
+    return true;
   }
 
   /**

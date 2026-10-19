@@ -1,5 +1,6 @@
 import { ByparrSolver } from './byparr.js';
 import { getMediaComments } from './comments.js';
+import { ChallengeError } from './errors.js';
 import { HttpClient } from './http.js';
 import { type DownloadOptions, downloadImage, downloadVideo } from './media.js';
 import { getUserMedias } from './medias.js';
@@ -147,11 +148,28 @@ export class StoryNavigationClient {
    * ⚠️ Signed IG URLs expire — call this immediately after receiving the API
    * response.
    *
+   * ⚠️ The image CDN is behind Cloudflare and expects the session's
+   * `cf_clearance` cookie + matching User-Agent. Call a list/profile method
+   * first (e.g. {@link getUserMedias} / {@link getProfile}) so those cookies
+   * exist; otherwise configure a solver. When a solver is configured and the
+   * download hits a challenge, the session is re-solved once and the download
+   * is retried.
+   *
    * @param base64Url - The base64-encoded IG image URL from the API.
-   * @throws {ExpiredUrlError} When the proxy answers `403`.
+   * @throws {ExpiredUrlError} When the proxy answers `403` (expired signature).
+   * @throws {ChallengeError} When a Cloudflare challenge cannot be resolved.
    */
   async downloadImage(base64Url: string): Promise<Uint8Array> {
-    return downloadImage(base64Url, this.downloadOptions());
+    try {
+      return await downloadImage(base64Url, this.downloadOptions());
+    } catch (error) {
+      // A challenge during download means the clearance is missing/stale. If a
+      // solver is configured, re-solve once and retry with fresh cookies/UA.
+      if (error instanceof ChallengeError && (await this.http.resolveChallenge())) {
+        return downloadImage(base64Url, this.downloadOptions());
+      }
+      throw error;
+    }
   }
 
   /**
@@ -174,6 +192,14 @@ export class StoryNavigationClient {
     }
     if (this.maxDownloadBytes !== undefined) {
       options.maxBytes = this.maxDownloadBytes;
+    }
+    const cookieHeader = this.http.getCookieHeader();
+    if (cookieHeader) {
+      options.cookieHeader = cookieHeader;
+    }
+    const userAgent = this.http.getUserAgent();
+    if (userAgent) {
+      options.userAgent = userAgent;
     }
     return options;
   }

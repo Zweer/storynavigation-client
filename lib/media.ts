@@ -1,4 +1,5 @@
-import { ExpiredUrlError, HttpError, MediaTooLargeError } from './errors.js';
+import { isCloudflareChallenge } from './challenge.js';
+import { ChallengeError, ExpiredUrlError, HttpError, MediaTooLargeError } from './errors.js';
 
 /** Base URL of the CDN proxy used for images. */
 export const CDN_IMAGE_HOST = 'https://cdn.storynavigation.com';
@@ -51,6 +52,17 @@ export interface DownloadOptions {
    * aborted with a {@link MediaTooLargeError}. Defaults to 100 MiB.
    */
   maxBytes?: number;
+  /**
+   * Pre-serialized cookie header (`name=value; …`) to replay on the CDN
+   * request. Required for the image CDN, which is now behind Cloudflare and
+   * expects the session's `cf_clearance` cookie.
+   */
+  cookieHeader?: string;
+  /**
+   * User-Agent to send. The image CDN's `cf_clearance` cookie is bound to the
+   * solver's User-Agent, so the same UA must be replayed on every request.
+   */
+  userAgent?: string;
 }
 
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -64,14 +76,32 @@ async function downloadBytes(url: string, options: DownloadOptions): Promise<Uin
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = { Referer: CDN_REFERER };
+    if (options.cookieHeader) {
+      headers.Cookie = options.cookieHeader;
+    }
+    if (options.userAgent) {
+      headers['User-Agent'] = options.userAgent;
+    }
     const response = await fetchImpl(url, {
       method: 'GET',
       signal: controller.signal,
-      headers: { Referer: CDN_REFERER },
+      headers,
     });
 
     if (response.status === 403) {
       const body = await response.text().catch(() => '');
+      // A Cloudflare challenge (now also guarding the image CDN) is NOT an
+      // expired URL: it means the session's cf_clearance/UA are missing or
+      // stale. Surface it as a ChallengeError so a solver can recover.
+      if (isCloudflareChallenge(response, body)) {
+        throw new ChallengeError(
+          'Cloudflare challenge from the image CDN — ensure a session is bootstrapped (call a list/profile method first) and/or configure a ChallengeSolver',
+          url,
+        );
+      }
+      // Otherwise (Bad URL timestamp / Bad URL hash, text/plain) the signed
+      // IG URL has expired.
       throw new ExpiredUrlError(
         body.trim() ? `${body.trim()} — the media URL has expired` : undefined,
       );
@@ -144,9 +174,15 @@ async function readCappedBody(
  * ⚠️ Signed IG URLs are short-lived. Call this **immediately** after receiving
  * the API response — never persist the base64 URL to download later.
  *
+ * ⚠️ The image CDN is now behind Cloudflare. Call a list/profile method first
+ * so the session's `cf_clearance` + matching User-Agent are available and
+ * passed via `options.cookieHeader`/`options.userAgent`; without them (and
+ * without a configured solver) the CDN answers with a challenge.
+ *
  * @param base64Url - The base64-encoded IG image URL from the API.
- * @param options - Optional fetch/timeout overrides.
+ * @param options - Optional fetch/timeout/session overrides.
  * @throws {ExpiredUrlError} When the proxy answers `403` (expired signature).
+ * @throws {ChallengeError} When the proxy answers with a Cloudflare challenge.
  */
 export async function downloadImage(
   base64Url: string,

@@ -243,6 +243,58 @@ describe('HttpClient challenge solver', () => {
   });
 });
 
+describe('HttpClient session accessors', () => {
+  function fakeSolver(): ChallengeSolver & { solve: ReturnType<typeof vi.fn> } {
+    const solved: SolvedSession = {
+      cookies: {
+        cf_clearance: 'cf',
+        laravel_session: 'session-abc',
+        'XSRF-TOKEN': 'token-xyz%3D%3D',
+      },
+      userAgent: 'UA/1.0',
+    };
+    const solve = vi.fn(async (): Promise<SolvedSession> => solved);
+    return { solve };
+  }
+
+  it('exposes the serialized cookie header after a raw bootstrap', async () => {
+    // Arrange
+    mockSession();
+    server.use(http.post(`${BASE_URL}/get-user-profile`, () => HttpResponse.json({ ok: true })));
+    const client = new HttpClient({ baseUrl: BASE_URL });
+
+    // Act
+    await client.post('get-user-profile', {}, 'nasa');
+
+    // Assert
+    expect(client.getCookieHeader()).toContain('laravel_session=session-abc');
+    expect(client.getCookieHeader()).toContain('XSRF-TOKEN=token-xyz%3D%3D');
+    expect(client.getUserAgent()).toBeUndefined();
+  });
+
+  it('exposes cookies + User-Agent after a solver bootstrap', async () => {
+    // Arrange
+    const solver = fakeSolver();
+    server.use(http.post(`${BASE_URL}/get-user-profile`, () => HttpResponse.json({ ok: true })));
+    const client = new HttpClient({ baseUrl: BASE_URL, solver });
+
+    // Act
+    await client.post('get-user-profile', {}, 'nasa');
+
+    // Assert
+    expect(client.getCookieHeader()).toContain('cf_clearance=cf');
+    expect(client.getUserAgent()).toBe('UA/1.0');
+  });
+
+  it('resolveChallenge returns false before any bootstrap', async () => {
+    // Arrange
+    const client = new HttpClient({ baseUrl: BASE_URL, solver: fakeSolver() });
+
+    // Act & Assert
+    expect(await client.resolveChallenge()).toBe(false);
+  });
+});
+
 describe('HttpClient JSON parsing', () => {
   it('maps a non-JSON 200 body to a non-retryable ParseError', async () => {
     // Arrange — server answers 200 with an HTML challenge page
