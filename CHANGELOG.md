@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/Zweer/storynavigation-client/compare/v1.1.0...v1.1.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **media:** :bug: replay session cookies + UA on CDN downloads behind Cloudflare ([f704bab](https://github.com/Zweer/storynavigation-client/commit/f704babf9a8a7bd15a238db5c5fcd294dfc302fd))
+
 ## [1.1.0](https://github.com/Zweer/storynavigation-client/compare/v1.0.0...v1.1.0) (2026-10-18)
 
 
